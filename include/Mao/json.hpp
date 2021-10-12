@@ -1,41 +1,51 @@
 #pragma once
+
 #include <any>
 #include <initializer_list>
 #include <iostream>
+#include <map>
 #include <set>
 #include <string>
-#include <unordered_map>
 #include <variant>
 #include <vector>
 
 namespace mao {
 
 class Json {
-private:
-  /**
-   * json 基本数据类型
-   */
-  // 数字型
-  using Number = std::variant<int, double, float, unsigned int, long long>;
-
+protected:
   // 字符串
   using String = std::string;
 
   // key值
-  using Key = std::string;
+  class Key : public std::string {};
 
   // 值
   using Value = std::any;
 
   // 对象
-  using Object = std::unordered_map<Key, Value>;
+  using Object = std::map<Key, Value>;
 
   // 数组
   using Array = std::vector<Value>;
 
+  /**
+   * 维护一个静态set容器，用于辅助 read_appoint_char() 函数
+   * 释放时自动调用内部的set的clear函数。
+   */
+  class Chars {
+  public:
+    auto getSet() {
+      static std::set<char> cs;
+      return cs;
+    }
+    ~Chars() { getSet().clear(); }
+  };
+
+private:
   // 用以存储数据的单位
   Value m_value;
 
+protected:
   /**
    * 重载 >> 函数
    * 参数T: 输入流对象
@@ -44,6 +54,15 @@ private:
    */
   template <typename T>
   friend T& operator>>(T&, Object&);
+
+  /**
+   * 重载 >> 函数
+   * 参数T: 输入流对象
+   * 参数Value：存储数据的对象
+   * 作用：判断流内数据对象类型，调用对应流入函数。
+   */
+  template <typename T>
+  friend T& operator>>(T&, Value&);
 
   /**
    * 重载 >> 函数
@@ -57,46 +76,33 @@ private:
   /**
    * 重载 >> 函数
    * 参数T: 输入流对象
-   * 参数String：存储数据的对象
+   * 参数Key：存储数据的对象
    * 作用：此时已经知道需要反序列化的数据为字符串数据，也就是说输入流中有由双引号包裹起来的数据。
    */
   template <typename T>
-  friend T& operator>>(T&, String&);
-
-  /**
-   * 重载 >> 函数
-   * 参数T: 输入流对象
-   * 参数bool：存储数据的对象
-   * 作用：此时已经知道需要反序列化的数据为布尔值数据，也就是说输入流中有由
-   * true/false 的连续字符数据。
-   */
-  template <typename T>
-  friend T& operator>>(T&, bool&);
-
-  /**
-   * 重载 >> 函数
-   * 参数T: 输入流对象
-   * 参数Number：存储数据的对象
-   * 作用：此时已经知道需要反序列化的数据为数字数据，也就是说输入流中有由全数字的连续字符数据。
-   */
-  template <typename T>
-  friend T& operator>>(T&, Number&);
+  friend T& operator>>(T&, Key&);
 
   /**
    * 从流中读取指定字符
    * 参数T：输入流
-   * 参数std::initializer_list<char>&：一堆字符
+   * 参数std::initializer_list<char>：一堆字符
    * 作用：从流中依次读取一个字符，直到读取的字符在参数中能找到。
    * 返回值：第一个布尔值为是否找到，如果找到第二个值为找到的那个字符。
    */
   template <typename T>
   static std::pair<bool, char> read_appoint_char(
       T&,
-      const std::initializer_list<char>&);
+      const std::initializer_list<char>);
 
 public:
   // 默认构造函数，以value的默认构造函数初始化自身
   Json() = default;
+
+  // 拷贝构造
+  Json(const Json&) = default;
+  Json& operator=(const Json&) = default;
+  Json& operator=(const Array&);
+  Json& operator=(const Object&);
 
   /**
    * 重载 >> 函数
@@ -116,12 +122,6 @@ public:
    */
   template <typename T>
   friend T& operator<<(T&, const Json&);
-
-  /**
-   * 判断函数
-   * 作用：判断当前储存的值是否为布尔值类型。
-   */
-  bool is_bool() const;
 
   /**
    * 判断函数
@@ -160,6 +160,112 @@ public:
   void reset() noexcept;
 };
 
+/** 清空函数 **/
+void Json::reset() noexcept {
+  if (!m_value.has_value())
+    m_value.reset();
+}
+
+Json& Json::operator=(const Array& array) {
+  m_value = array;
+  return *this;
+}
+
+Json& Json::operator=(const Object& object) {
+  m_value = object;
+  return *this;
+}
+
+/** 重载 >> 函数  参数：输入流 与 Value。详细见声明 **/
+template <typename T>
+T& operator>>(T& is, Json::Value& value) {
+  char c;
+  is >> c;
+
+  if (!is.good())
+    return is;
+
+  // 判断数据类型为字符串
+  if (c == '"') {
+    value = Json::Key{};
+    is.seekg(-1, std::ios::cur);
+    is >> std::any_cast<Json::Key&>(value);
+
+    // 判断数据类型为对象
+  } else if (c == '{') {
+    value = Json::Object{};
+    is.seekg(-1, std::ios::cur);
+    is >> std::any_cast<Json::Object&>(value);
+
+    // 判断数据类型为数组
+  } else if (c == '[') {
+    value = Json::Array{};
+    is.seekg(-1, std::ios::cur);
+    is >> std::any_cast<Json::Array&>(value);
+
+    // 判断数据类型为布尔值并且为true
+  } else if (c == 't') {
+    is >> c;
+    if (c == 'r') {
+      is >> c;
+      if (c == 'u') {
+        is >> c;
+        if (c == 'e') {
+          value = true;
+        }
+      }
+    }
+
+    // 判断数据类型为布尔值并且为false
+  } else if (c == 'f') {
+    is >> c;
+    if (c == 'a') {
+      is >> c;
+      if (c == 'l') {
+        is >> c;
+        if (c == 's') {
+          is >> c;
+          if (c == 'e') {
+            value = false;
+          }
+        }
+      }
+    }
+
+    // 判断数据类型为数字
+  } else if (c >= '0' && c <= '9') {
+    double num;
+    is.seekg(-1, std::ios::cur);
+    is >> num;
+    if (num == static_cast<int>(num)) {
+      value = static_cast<int>(num);
+    } else
+      value = num;
+  }
+
+  return is;
+}
+
+/** 重载 >> 函数  参数：输入流 与 Key。详细见声明 **/
+template <typename T>
+T& operator>>(T& is, Json::Key& key) {
+  // 忽略第一个字符 '"'
+  if (!Json::read_appoint_char(is, {'"'}).first)
+    return is;
+
+  char c;
+  while (true) {
+    is >> c;
+
+    // 异常流对象或者接收到双引号，退出循环
+    if (!is.good() || c == '"')
+      break;
+
+    key += c;
+  }
+  return is;
+}
+
 /** 重载 >> 函数  参数：输入流 与 Array。详细见声明 **/
 template <typename T>
 T& operator>>(T& is, Json::Array& array) {
@@ -171,11 +277,15 @@ T& operator>>(T& is, Json::Array& array) {
   is >> c;
 
   Json::Value value;
-  do {
+  while (true) {
     is >> value;
     array.push_back(value);
-    auto reuslt{Json::read_appoint_char(is, ',', ']')};
-  } while (is.good() && reuslt.first && reuslt.second != ']');
+    auto reuslt{Json::read_appoint_char(is, {',', ']'})};
+
+    if (is.good() && reuslt.first && reuslt.second != ']')
+      break;
+  }
+
   return is;
 }
 
@@ -189,7 +299,24 @@ T& operator>>(T& is, Json::Object& object) {
   // 忽略第一个字符 '{'
   is >> c;
 
-  // 读取 Key
+  while (true) {
+    // 读取 Key
+    Json::Key key;
+    is >> key;
+
+    // 忽略 中间字符 ':'
+    if (!Json::read_appoint_char(is, {':'}).first)
+      return is;  // 输入流异常，直接返回
+
+    Json::Value value;
+    is >> value;
+
+    auto result{Json::read_appoint_char(is, {',', '}'})};
+
+    if (!result.first || result.second == '}')
+      break;  // 输入流异常或者找到右花括号结束循环
+  }
+  return is;
 }
 
 /** json 的重载 >> 函数，详细见声明。 **/
@@ -203,7 +330,7 @@ T& operator>>(T& is, Json& json) {
   json.reset();
 
   // 清空错误数据，并找到合适开头
-  auto reuslt = Json::read_appoint_char(is, '[', '{');
+  auto reuslt = Json::read_appoint_char(is, {'[', '{'});
   if (reuslt.first && reuslt.second == '[') {
     // 回退流内置指针， 保障后面流入时数据是由方括号包裹。
     is.seekg(-1, std::ios::cur);
@@ -227,11 +354,13 @@ T& operator>>(T& is, Json& json) {
 template <typename T>
 std::pair<bool, char> Json::read_appoint_char(
     T& is,
-    const std::initializer_list<char>& init_chars) {
+    const std::initializer_list<char> init_chars) {
   char c;
 
   // 构建一个由一堆需要查找的字符组成的树，便于后续查找
-  std::set<char> set_chars{init_chars.begin(), init_chars.end()};
+  Chars chars;
+  auto set_chars{chars.getSet()};
+  set_chars.insert(init_chars.begin(), init_chars.end());
 
   while (true) {
     if (!is.good()) {
@@ -243,6 +372,6 @@ std::pair<bool, char> Json::read_appoint_char(
       break;
   }
 
-  return std::make_pair<bool, char>(true, c);
+  return std::make_pair(true, c);
 }
 }  // namespace mao
