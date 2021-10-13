@@ -1,6 +1,7 @@
 #pragma once
 
 #include <any>
+#include <fstream>
 #include <initializer_list>
 #include <iostream>
 #include <map>
@@ -34,7 +35,7 @@ protected:
    */
   class Chars {
   public:
-    auto getSet() {
+    auto& getSet() {
       static std::set<char> cs;
       return cs;
     }
@@ -50,7 +51,7 @@ protected:
    * 重载 >> 函数
    * 参数T: 输入流对象
    * 参数Object：存储数据的对象
-   * 作用：此时已经知道需要反序列化的数据为对象数据，也就是说输入流中有由花括号包裹起来的数据。
+   * 作用：此时已经知道需要反序列化的数据为对象数据，当收到'}'返回。
    */
   template <typename T>
   friend T& operator>>(T&, Object&);
@@ -68,7 +69,7 @@ protected:
    * 重载 >> 函数
    * 参数T: 输入流对象
    * 参数Array：存储数据的对象
-   * 作用：此时已经知道需要反序列化的数据为数组数据，也就是说输入流中有由方括号包裹起来的数据。
+   * 作用：此时已经知道需要反序列化的数据为数组数据，当收到']'返回。
    */
   template <typename T>
   friend T& operator>>(T&, Array&);
@@ -77,10 +78,19 @@ protected:
    * 重载 >> 函数
    * 参数T: 输入流对象
    * 参数Key：存储数据的对象
-   * 作用：此时已经知道需要反序列化的数据为字符串数据，也就是说输入流中有由双引号包裹起来的数据。
+   * 作用：此时已经知道需要反序列化的数据为字符串数据，当收到'"'返回。
    */
   template <typename T>
   friend T& operator>>(T&, Key&);
+
+  /**
+   * 重载 << 函数
+   * 参数T：输出流对象
+   * 参数Value：需要序列化的数据
+   * 作用：将 Value 序列化并流入输出流中
+   */
+  template <typename T>
+  friend T& operator<<(T&, const Value&);
 
   /**
    * 从流中读取指定字符
@@ -94,6 +104,9 @@ protected:
       T&,
       const std::initializer_list<char>);
 
+  Json& operator=(const Array&);
+  Json& operator=(const Object&);
+
 public:
   // 默认构造函数，以value的默认构造函数初始化自身
   Json() = default;
@@ -101,8 +114,6 @@ public:
   // 拷贝构造
   Json(const Json&) = default;
   Json& operator=(const Json&) = default;
-  Json& operator=(const Array&);
-  Json& operator=(const Object&);
 
   /**
    * 重载 >> 函数
@@ -127,38 +138,149 @@ public:
    * 判断函数
    * 作用：判断当前储存的值是否为数字类型。
    */
-  bool is_number() const;
+  inline bool is_number() const;
 
   /**
    * 判断函数
    * 作用：判断当前储存的值是否为字符串类型。
    */
-  bool is_string() const;
+  inline bool is_string() const;
 
   /**
    * 判断函数
    * 作用：判断当前储存的值是否为数组类型。
    */
-  bool is_array() const noexcept;
+  inline bool is_array() const noexcept;
 
   /**
    * 判断函数
    * 作用：判断当前储存的值是否为对象。
    */
-  bool is_object() const noexcept;
+  inline bool is_object() const noexcept;
 
   /**
    * 判断函数
    * 作用：判断当前储存的值是否空。
    */
-  bool is_empty() const noexcept;
+  inline bool is_empty() const noexcept;
 
   /**
    * 清空函数
    * 作用：清空m_value所含的值
    */
-  void reset() noexcept;
+  inline void reset() noexcept;
 };
+
+/**
+ * 重载 << 函数
+ * 参数T：输出流对象
+ * 参数Value：需要序列化的数据
+ * 作用：将 Value 序列化并流入输出流中
+ */
+template <typename T>
+T& operator<<(T& os, const Json::Value& value) {
+  // 当值为空时
+  if (!value.has_value()) {
+    // 不作任何处理
+
+  } else if (value.type() == typeid(Json::Object)) {
+    os << '{';
+    auto falg{false};
+    auto& obj{std::any_cast<const Json::Object&>(value)};
+    for (const auto& p : obj) {
+      os << '"' << dynamic_cast<const std::string&>(p.first)
+         << "\":" << p.second << ',';
+      if (!falg)
+        falg = true;
+    }
+    if (falg)
+      os << '\b';
+    os << '}';
+
+  } else if (value.type() == typeid(Json::Array)) {
+    os << '[';
+    auto falg{false};
+    auto& array{std::any_cast<const Json::Array&>(value)};
+    for (const auto& v : array) {
+      os << v << ',';
+      if (!falg)
+        falg = true;
+    }
+    if (falg)
+      os << '\b';
+    os << "]";
+
+  } else if (value.type() == typeid(int)) {
+    os << std::any_cast<const int&>(value);
+
+  } else if (value.type() == typeid(double)) {
+    os << std::any_cast<const double&>(value);
+
+  } else if (value.type() == typeid(std::string)) {
+    os << '"' << std::any_cast<const std::string&>(value) << '"';
+
+  } else if (value.type() == typeid(bool)) {
+    if (std::any_cast<bool>(value))
+      os << "true";
+    else
+      os << "false";
+  } else {
+    // 忽略
+  }
+  return os;
+}
+
+/**
+ * 重载 << 函数
+ * 参数T：输出流对象
+ * 作用：将本身的数据序列化到输出流对象当中。
+ * 使用：std::cout << json;
+ */
+template <typename T>
+T& operator<<(T& os, const Json& json) {
+  os << json.m_value;
+  return os;
+}
+
+/**
+ * 判断函数
+ * 作用：判断当前储存的值是否为数字类型。
+ */
+bool Json::is_number() const {
+  return m_value.type() == typeid(double) || m_value.type() == typeid(int);
+}
+
+/**
+ * 判断函数
+ * 作用：判断当前储存的值是否为字符串类型。
+ */
+bool Json::is_string() const {
+  return m_value.type() == typeid(std::string);
+}
+
+/**
+ * 判断函数
+ * 作用：判断当前储存的值是否为数组类型。
+ */
+bool Json::is_array() const noexcept {
+  return m_value.type() == typeid(Array);
+}
+
+/**
+ * 判断函数
+ * 作用：判断当前储存的值是否为对象。
+ */
+bool Json::is_object() const noexcept {
+  return m_value.type() == typeid(Object);
+}
+
+/**
+ * 判断函数
+ * 作用：判断当前储存的值是否空。
+ */
+bool Json::is_empty() const noexcept {
+  return m_value.has_value();
+}
 
 /** 清空函数 **/
 void Json::reset() noexcept {
@@ -185,22 +307,22 @@ T& operator>>(T& is, Json::Value& value) {
   if (!is.good())
     return is;
 
+  auto numChar{[](const char c_) { return c_ >= '0' && c_ <= '9'; }};
+
   // 判断数据类型为字符串
   if (c == '"') {
     value = Json::Key{};
-    is.seekg(-1, std::ios::cur);
     is >> std::any_cast<Json::Key&>(value);
+    value = dynamic_cast<std::string&>(std::any_cast<Json::Key&>(value));
 
     // 判断数据类型为对象
   } else if (c == '{') {
     value = Json::Object{};
-    is.seekg(-1, std::ios::cur);
     is >> std::any_cast<Json::Object&>(value);
 
     // 判断数据类型为数组
   } else if (c == '[') {
     value = Json::Array{};
-    is.seekg(-1, std::ios::cur);
     is >> std::any_cast<Json::Array&>(value);
 
     // 判断数据类型为布尔值并且为true
@@ -233,14 +355,17 @@ T& operator>>(T& is, Json::Value& value) {
     }
 
     // 判断数据类型为数字
-  } else if (c >= '0' && c <= '9') {
-    double num;
+  } else if (numChar(c)) {
+    // 使用seekg()函数时，如果是fstream打开开方式需要是ios::binary
     is.seekg(-1, std::ios::cur);
+    double num;
+
     is >> num;
     if (num == static_cast<int>(num)) {
       value = static_cast<int>(num);
-    } else
+    } else {
       value = num;
+    }
   }
 
   return is;
@@ -249,13 +374,18 @@ T& operator>>(T& is, Json::Value& value) {
 /** 重载 >> 函数  参数：输入流 与 Key。详细见声明 **/
 template <typename T>
 T& operator>>(T& is, Json::Key& key) {
-  // 忽略第一个字符 '"'
-  if (!Json::read_appoint_char(is, {'"'}).first)
-    return is;
-
   char c;
   while (true) {
     is >> c;
+
+    // 判断是否是转义字符，如果是无条件记录下一个字符
+    if (is.good() && c == '\\') {
+      is >> c;
+      if (is.good()) {
+        key += c;
+        is >> c;
+      }
+    }
 
     // 异常流对象或者接收到双引号，退出循环
     if (!is.good() || c == '"')
@@ -272,17 +402,13 @@ T& operator>>(T& is, Json::Array& array) {
   if (!is.good())
     return is;
 
-  char c;
-  // 忽略第一个字符 '['
-  is >> c;
-
   Json::Value value;
   while (true) {
     is >> value;
     array.push_back(value);
     auto reuslt{Json::read_appoint_char(is, {',', ']'})};
 
-    if (is.good() && reuslt.first && reuslt.second != ']')
+    if ((!is.good()) || (reuslt.first && reuslt.second == ']'))
       break;
   }
 
@@ -295,11 +421,11 @@ T& operator>>(T& is, Json::Object& object) {
   if (!is.good())
     return is;
 
-  char c;
-  // 忽略第一个字符 '{'
-  is >> c;
-
   while (true) {
+    // 忽略 字符串左 '"'
+    if (!Json::read_appoint_char(is, {'"'}).first)
+      return is;  // 输入流异常，直接返回
+
     // 读取 Key
     Json::Key key;
     is >> key;
@@ -310,6 +436,9 @@ T& operator>>(T& is, Json::Object& object) {
 
     Json::Value value;
     is >> value;
+
+    if (value.has_value())
+      object.insert(std::make_pair(std::move(key), std::move(value)));
 
     auto result{Json::read_appoint_char(is, {',', '}'})};
 
@@ -323,7 +452,7 @@ T& operator>>(T& is, Json::Object& object) {
 template <typename T>
 T& operator>>(T& is, Json& json) {
   // 判断输入流是否正常,异常则直接退出。
-  if (is.good())
+  if (!is.good())
     return is;
 
   // 清空旧数据
@@ -331,17 +460,14 @@ T& operator>>(T& is, Json& json) {
 
   // 清空错误数据，并找到合适开头
   auto reuslt = Json::read_appoint_char(is, {'[', '{'});
-  if (reuslt.first && reuslt.second == '[') {
-    // 回退流内置指针， 保障后面流入时数据是由方括号包裹。
-    is.seekg(-1, std::ios::cur);
 
+  // 回退流内置指针， 保障后面流入时数据是由括号包裹。
+  if (reuslt.first && reuslt.second == '[') {
     Json::Array array;
     is >> array;
     json = std::move(array);
-  } else {
-    // 回退流内置指针， 保障后面流入时数据是由花括号包裹。
-    is.seekg(-1, std::ios::cur);
 
+  } else if (reuslt.first && reuslt.second == '{') {
     Json::Object object;
     is >> object;
     json = std::move(object);
@@ -359,7 +485,7 @@ std::pair<bool, char> Json::read_appoint_char(
 
   // 构建一个由一堆需要查找的字符组成的树，便于后续查找
   Chars chars;
-  auto set_chars{chars.getSet()};
+  auto& set_chars{chars.getSet()};
   set_chars.insert(init_chars.begin(), init_chars.end());
 
   while (true) {
