@@ -302,72 +302,89 @@ Json& Json::operator=(const Object& object) {
 template <typename T>
 T& operator>>(T& is, Json::Value& value) {
   char c;
-  is >> c;
-
-  if (!is.good())
-    return is;
-
   auto numChar{[](const char c_) { return c_ >= '0' && c_ <= '9'; }};
 
-  // 判断数据类型为字符串
-  if (c == '"') {
-    value = Json::Key{};
-    is >> std::any_cast<Json::Key&>(value);
-    value = dynamic_cast<std::string&>(std::any_cast<Json::Key&>(value));
-
-    // 判断数据类型为对象
-  } else if (c == '{') {
-    value = Json::Object{};
-    is >> std::any_cast<Json::Object&>(value);
-
-    // 判断数据类型为数组
-  } else if (c == '[') {
-    value = Json::Array{};
-    is >> std::any_cast<Json::Array&>(value);
-
-    // 判断数据类型为布尔值并且为true
-  } else if (c == 't') {
+  while (true) {
     is >> c;
-    if (c == 'r') {
-      is >> c;
-      if (c == 'u') {
-        is >> c;
-        if (c == 'e') {
-          value = true;
-        }
-      }
-    }
+    if (!is.good())
+      return is;
 
-    // 判断数据类型为布尔值并且为false
-  } else if (c == 'f') {
-    is >> c;
-    if (c == 'a') {
+    // 判断数据类型为字符串
+    if (c == '"') {
+      value = Json::Key{};
+      is >> std::any_cast<Json::Key&>(value);
+      value = dynamic_cast<std::string&>(std::any_cast<Json::Key&>(value));
+      break;
+
+      // 判断数据类型为对象
+    } else if (c == '{') {
+      value = Json::Object{};
+      is >> std::any_cast<Json::Object&>(value);
+      break;
+
+      // 判断数据类型为数组
+    } else if (c == '[') {
+      value = Json::Array{};
+      is >> std::any_cast<Json::Array&>(value);
+      break;
+
+      // 判断数据类型为布尔值并且为true
+    } else if (c == 't') {
       is >> c;
-      if (c == 'l') {
+      if (c == 'r') {
         is >> c;
-        if (c == 's') {
+        if (c == 'u') {
           is >> c;
           if (c == 'e') {
-            value = false;
+            value = true;
+            break;
           }
         }
       }
-    }
 
-    // 判断数据类型为数字
-  } else if (numChar(c)) {
-    // 使用seekg()函数时，如果是fstream打开开方式需要是ios::binary
-    is.seekg(-1, std::ios::cur);
-    double num;
+      // 判断数据类型为布尔值并且为false
+    } else if (c == 'f') {
+      is >> c;
+      if (c == 'a') {
+        is >> c;
+        if (c == 'l') {
+          is >> c;
+          if (c == 's') {
+            is >> c;
+            if (c == 'e') {
+              value = false;
+              break;
+            }
+          }
+        }
+      }
 
-    is >> num;
-    if (num == static_cast<int>(num)) {
-      value = static_cast<int>(num);
-    } else {
-      value = num;
+      // 判断数据类型为数字
+    } else if (numChar(c)) {
+      std::string num_str{c};
+      bool is_decimal{false};
+      while (true) {
+        c = static_cast<char>(is.peek());
+        if (numChar(c)) {
+          num_str += c;
+        } else if ((!is_decimal && c == '.')) {
+          num_str += c;
+          is_decimal = true;
+        } else {
+          break;
+        }
+        is.get();
+      }
+
+      double num{std::stod(num_str)};
+      if (num == static_cast<int>(num)) {
+        value = static_cast<int>(num);
+      } else {
+        value = num;
+      }
+      break;
     }
   }
-
   return is;
 }
 
